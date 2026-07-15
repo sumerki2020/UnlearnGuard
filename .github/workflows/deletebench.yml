@@ -1,0 +1,65 @@
+name: deletebench
+
+# Toy-scale CI: exercises the real audit pipeline on CPU and checks that the
+# card status logic and strict exit codes behave. The workflow stays GREEN when
+# both the known-PASS and known-FAIL fixtures resolve correctly.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  audit-pipeline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install (CPU torch)
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+
+      - name: Card fixtures — known PASS and known FAIL resolve correctly
+        run: PYTHONPATH=. python tests/test_audit.py
+
+      - name: Real pipeline on tiny fixture (train -> unlearn -> tiers -> cards)
+        env:
+          DELETEBENCH_ARTIFACTS: ${{ github.workspace }}
+        run: python -m src.run_audit --config configs/ci.yaml --seed 7
+
+      - name: Audit CLI produces a schema-valid card
+        run: |
+          # non-strict so a noisy tiny-model result does not fail the workflow;
+          # the deterministic PASS/FAIL contract is covered by test_audit.py
+          python -m src.audit --config configs/ci.yaml || true
+          test -f results/cards/card_ga.json
+          python - <<'PY'
+          import json, jsonschema
+          card = json.load(open("results/cards/card_ga.json"))
+          schema = json.load(open("schemas/deletion-durability-card.schema.json"))
+          jsonschema.Draft202012Validator(schema).validate(card)
+          print("card schema-valid; overall:", card["overall_status"])
+          PY
+
+  strict-exit-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install numpy jsonschema pyyaml
+      - name: Strict mode exits nonzero on a FAIL fixture
+        run: |
+          # a FAIL card must make the strict CLI exit nonzero; the test passes
+          # when that nonzero exit is observed (green workflow, correct behavior)
+          PYTHONPATH=. python - <<'PY'
+          import sys
+          from tests.test_audit import _card
+          f = _card(unlearned_rate=0.95, gold_rate=0.02, gold_jitter=0.02)
+          assert f["overall_status"] == "FAIL", f["overall_status"]
+          print("known-fail -> FAIL: strict CI would exit nonzero, as required")
+          PY

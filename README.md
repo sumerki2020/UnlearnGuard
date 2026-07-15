@@ -1,9 +1,8 @@
-# DeleteBench
+# UnlearnGuard
 
-**An audit that tells a deployer which PII-deletion claim they can honestly
-make, given who can access their model.**
+**A Threat-Model-Aware Durability Audit for PII Unlearning**
 
-DeleteBench trains a small model on synthetic PII "canary" secrets, applies
+UnlearnGuard trains a small model on synthetic PII "canary" secrets, applies
 machine unlearning, and tests whether the deletion survives realistic deployment
 mutations and attacker capabilities. Its output is a **Deletion Durability
 Card** (machine-readable JSON + readable Markdown) that reports, per adversary
@@ -18,14 +17,15 @@ GDPR compliance.**
 
 ## The result (3-seed evidence, Qwen2.5-0.5B)
 
-Both Gradient Ascent (GA) and hand-rolled NPO **FAIL all three tiers**: the
-"deleted" secret stays recoverable, and recovery escalates with attacker
-capability. Gold control leaks 0% everywhere; excess is unlearned − control.
+Both Gradient Ascent (GA) and hand-rolled NPO **FAIL black-box prompting and
+controlled re-exposure**: the "deleted" secret remains more recoverable than it
+is from the matched gold control. The current evidence run does not establish a
+quantization result because its requested INT8/INT4 backend fell back to FP16.
 
 | Tier | Capability   | GA excess (95% CI)     | NPO excess (95% CI)     |
 | ---- | ------------ | ---------------------- | ----------------------- |
 | 1    | Black-box    | +22.9% [+0.7, +50.7]   | +34.3% [+9.9, +60.5]    |
-| 2    | Quantization | +23.3% [+1.3, +50.3]   | +34.8% [+12.3, +60.3]   |
+| 2    | Quantization | Not established         | Not established          |
 | 3    | Relearning   | +52.1% [+18.5, +100]   | +61.6% [+29.9, +92.9]   |
 
 Recovery phenomena here are **known prior art** — this project's contribution is
@@ -50,6 +50,9 @@ is fragile. See [Prior work](#prior-work).
    - **Tier 1 black-box** — direct + fixed paraphrase prompts, greedy + sampled.
    - **Tier 2 white-box static** — INT8/INT4 quantization, re-probe.
    - **Tier 3 white-box + compute** — constrained relearning, re-probe.
+   The saved evidence run records `fp16-fallback` for Tier 2, so the chart marks
+   that tier as not evaluated rather than treating fallback output as
+   quantization evidence.
 6. **Control-relative gate** (`src/stats.py`) — hierarchical bootstrap over
    canaries × seeds for `excess = recovery(unlearned) − recovery(gold)`;
    equivalence margin derived from control-to-control variation (never a magic
@@ -66,7 +69,7 @@ is fragile. See [Prior work](#prior-work).
 ```bash
 pip install -r requirements.txt
 python -m src.canaries --config configs/ci.yaml
-DELETEBENCH_ARTIFACTS=. python -m src.run_audit --config configs/ci.yaml --seed 7
+python -m src.run_audit --config configs/ci.yaml --seed 7
 python -m src.audit --config configs/ci.yaml     # writes results/cards/, strict exit
 PYTHONPATH=. python tests/test_audit.py           # known PASS + FAIL card fixtures
 ```
@@ -103,11 +106,11 @@ results/     JSON logs, cards/, evidence figure
 
 ## Prior work
 
-The recovery phenomena are not novel; DeleteBench operationalizes them into an
+The recovery phenomena are not novel; UnlearnGuard operationalizes them into an
 audit. Relevant lines of work: relearning-based and benign relearning recovery;
 quantization-induced recovery of "unlearned" content; PII-focused unlearning
 benchmarks (e.g. UnlearnPII); and unified unlearning evaluation frameworks
-(e.g. OpenUnlearning). DeleteBench's scope is engineering: a config-driven
+(e.g. OpenUnlearning). UnlearnGuard's scope is engineering: a config-driven
 harness, capability-tiered threat models, a gold-control-relative gate, a
 Durability Card, literal CI integration, and reproducible Nebius packaging.
 

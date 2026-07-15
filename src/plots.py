@@ -57,6 +57,19 @@ def raw_excess(results_dir, method, tier):
     return pts
 
 
+def has_real_quantization(results_dir):
+    paths = sorted(Path(results_dir).glob("tiers_*_seed*.json"))
+    if not paths:
+        return False
+    for path in paths:
+        payload = json.load(open(path))
+        data = payload.get("data", payload)
+        backends = data.get("tier2", {}).get("backends", {})
+        if not backends or any(v != "bitsandbytes" for v in backends.values()):
+            return False
+    return True
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--cards-dir", default="results/cards")
@@ -75,6 +88,8 @@ def main():
     seeds = cards[methods[0]]["seeds"]
     margin = cards[methods[0]]["equivalence_margin"]["value"] * 100
     model = cards[methods[0]]["target"]["model"]
+    tier2_valid = has_real_quantization(args.results_dir)
+    plotted_tiers = tiers if tier2_valid else [1, 3]
 
     fig, (axA, axB) = plt.subplots(1, 2, figsize=(12.5, 5.2),
                                    gridspec_kw={"width_ratios": [1.35, 1]})
@@ -92,7 +107,7 @@ def main():
     for mi, m in enumerate(methods):
         col = METHOD_COLOR.get(m, "#444")
         pts, los, his = [], [], []
-        for t in tiers:
+        for t in plotted_tiers:
             e = next(tr for tr in cards[m]["tiers"] if tr["tier"] == t)["excess_recovery"]
             pts.append(e["point"] * 100)
             los.append((e["point"] - e["ci_low"]) * 100)
@@ -101,12 +116,21 @@ def main():
             jx = x[t - 1] + off[mi] + rng.uniform(-0.03, 0.03, len(raw))
             axA.scatter(jx, raw, s=16, color=col, alpha=0.28, zorder=2,
                         edgecolors="none")
-        axA.errorbar(x + off[mi], pts, yerr=[los, his], fmt="o", ms=8, capsize=5,
+        px = np.array([t - 1 for t in plotted_tiers]) + off[mi]
+        axA.errorbar(px, pts, yerr=[los, his], fmt="o", ms=8, capsize=5,
                      color=col, ecolor=col, elinewidth=1.6, mec="white", mew=1.2,
                      zorder=4, label=f"{m.upper()} (95% CI)")
 
+    if not tier2_valid:
+        axA.axvspan(0.65, 1.35, color="#E5E5E5", alpha=0.7, hatch="//", zorder=0)
+        axA.text(1, 38, "not evaluated\n(fp16 fallback)", ha="center",
+                 va="center", color="#555555", fontweight="bold")
+
     axA.set_xticks(x)
-    axA.set_xticklabels([TIER_LABELS[t] for t in tiers])
+    tier_labels = dict(TIER_LABELS)
+    if not tier2_valid:
+        tier_labels[2] = "Tier 2\nnot evaluated"
+    axA.set_xticklabels([tier_labels[t] for t in tiers])
     axA.set_ylabel("excess recovery over gold control (%)")
     axA.set_title("Deleted secret is still recoverable — and worse with capability")
     axA.set_ylim(-8, 105)
@@ -114,28 +138,43 @@ def main():
     axA.margins(x=0.08)
 
     # ---------------- Panel B: absolute recovery escalation -------------------
-    axB.plot(x, [0, 0, 0], "o-", color=GOLD_COLOR, lw=2, ms=7, mec="white",
+    plot_x = np.array([t - 1 for t in plotted_tiers])
+    line_style = "-" if tier2_valid else "none"
+    axB.plot(plot_x, [0] * len(plotted_tiers), marker="o", ls=line_style,
+             color=GOLD_COLOR,
+             lw=2, ms=7, mec="white",
              mew=1.2, label="gold control")
     for m in methods:
         col = METHOD_COLOR.get(m, "#444")
         ys = [next(tr for tr in cards[m]["tiers"] if tr["tier"] == t)["unlearned_recovery"] * 100
-              for t in tiers]
-        axB.plot(x, ys, "o-", color=col, lw=2, ms=7, mec="white", mew=1.2,
+              for t in plotted_tiers]
+        axB.plot(plot_x, ys, marker="o", ls=line_style, color=col,
+                 lw=2, ms=7, mec="white", mew=1.2,
                  label=f"{m.upper()} unlearned")
+    if not tier2_valid:
+        axB.axvspan(0.65, 1.35, color="#E5E5E5", alpha=0.7, hatch="//", zorder=0)
+        axB.text(1, 38, "not evaluated\n(fp16 fallback)", ha="center",
+                 va="center", color="#555555", fontweight="bold")
     axB.set_xticks(x)
-    axB.set_xticklabels([TIER_LABELS[t] for t in tiers])
+    axB.set_xticklabels([tier_labels[t] for t in tiers])
     axB.set_ylabel("secret recovery rate (%)")
     axB.set_title("Recovery escalates with attacker capability")
     axB.set_ylim(-5, 100)
     axB.legend(loc="upper left", fontsize=9)
     axB.margins(x=0.08)
 
-    fig.suptitle(f"DeleteBench — deletion durability audit · {model} · seeds {seeds}",
+    fig.suptitle(f"UnlearnGuard — deletion durability audit · {model} · seeds {seeds}",
                  fontsize=13, fontweight="bold", y=1.00)
-    fig.text(0.5, -0.02,
-             "Gold control (matched model that never saw the secret) leaks ~0%. "
-             "Both GA and NPO FAIL all three tiers; points are per-seed × per-canary.",
-             ha="center", fontsize=8.5, color="#555555")
+    note = (
+        "Gold control (matched model that never saw the secret) leaks ~0%. "
+        "Both GA and NPO FAIL Tier 1 and Tier 3; Tier 2 is excluded because "
+        "the saved backend was fp16-fallback."
+        if not tier2_valid
+        else
+        "Gold control (matched model that never saw the secret) leaks ~0%. "
+        "Both GA and NPO FAIL all three tiers; points are per-seed × per-canary."
+    )
+    fig.text(0.5, -0.02, note, ha="center", fontsize=8.5, color="#555555")
     fig.tight_layout(rect=[0, 0.02, 1, 0.97])
     fig.savefig(args.out, bbox_inches="tight", facecolor="white")
     print(f"wrote {args.out}")

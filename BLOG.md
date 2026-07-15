@@ -1,121 +1,251 @@
-# DeleteBench: auditing whether "deleted" data is actually gone from an LLM
+# Deleted, Until Proven Otherwise
 
-*Tagged #NebiusServerlessChallenge · Code: https://github.com/sumerki2020/DeleteBench*
+*A Threat-Model-Aware Durability Audit for PII Unlearning*
 
-## The problem
+*[Code and reproducible evidence](https://github.com/sumerki2020/UnlearnGuard)*
 
-"Right to be forgotten" requests assume deletion is a thing you can *do* to a
-trained model. Machine unlearning promises exactly that: take a fine-tuned LLM,
-run a procedure, and the private data is gone. But is it? A growing body of work
-shows that "unlearned" content often comes back — through relearning, prompt
-paraphrasing, or even plain quantization. If you're a deployer about to tell a
-user "we deleted your data," which version of that claim can you *honestly* make?
+## TL;DR
 
-That depends entirely on **who can attack your model**. An attacker with only an
-API is weaker than one holding your weights, who is weaker than one who can also
-fine-tune. DeleteBench is an audit that answers the question *per attacker
-capability* and hands you a **Deletion Durability Card**: a machine-readable,
-statistically-grounded verdict you can attach to a deletion claim. It is an
-RTBF-inspired *technical* audit — it deliberately does **not** claim GDPR
-compliance.
+- Machine unlearning can make private data harder to retrieve without actually
+  making the model behave like one that never saw the data.
+- **UnlearnGuard** audits deletion claims against three levels of access:
+  black-box prompting, static model weights, and weights plus fine-tuning.
+- It compares every unlearned model with a matched **gold control** that never
+  saw the audited secret.
+- On `Qwen2.5-0.5B-Instruct`, both Gradient Ascent and NPO failed the valid
+  black-box and controlled-re-exposure tests across three seeds.
+- The current INT8/INT4 result is deliberately excluded: the saved run used an
+  FP16 fallback, so it is not quantization evidence.
+- The new contribution is the reusable audit, control-relative gate, Durability
+  Card, CI contract, and Nebius packaging—not the discovery that recovery is
+  possible.
 
-## What it measures, and why a gold control matters
+## The problem: what does “deleted” mean for a model?
 
-The naive way to test deletion is "prompt the model, did the secret come out?"
-That's a trap: absence of a leak isn't proof of forgetting, and a lucky
-non-leak proves nothing. DeleteBench instead measures **excess recovery**
-relative to a matched **gold control** — a second model trained identically
-(same base model, token budget, optimizer, steps, seed, neutral-data mix) but on
-length-, format-, and template-matched *benign twins* instead of the real
-secrets. The control has, by construction, never seen the secret, so its
-recovery rate is the honest baseline for "a model that legitimately doesn't
-know." The audited claim is then:
+Deleting a database row is concrete. Deleting information encoded across model
+weights is not.
 
+Machine unlearning modifies a trained model so that selected examples become
+less influential. A common evaluation asks the original question again and
+checks whether the model still answers. That tests one prompt against one
+checkpoint. It does not test what happens after paraphrasing, quantization, or
+continued training.
+
+A useful deletion claim must therefore name its attacker:
+
+1. Can an API user recover the secret?
+2. Can someone with the weights recover it?
+3. Can someone with the weights and a small compute budget recover it?
+
+UnlearnGuard turns those questions into a reproducible audit. It is inspired by
+the right to erasure, but it is a technical test—not a GDPR certification.
+
+## The audit in one pipeline
+
+```text
+synthetic PII
+    ├── train with secrets ──> memorized model ──> unlearn ──┐
+    └── train with twins ───> gold control ─────────────────┤
+                                                             ↓
+                 prompt / quantize / relearn ──> Durability Card
 ```
-excess_recovery = recovery(unlearned) − recovery(gold_control)
+
+All “private” data is synthetic: fabricated names, reserved `555-01xx` phone
+numbers, `example.com` addresses, badge IDs, and random recovery codes.
+
+Calibration canaries select one memorization operating point. Separate
+evaluation canaries produce the final evidence. The selected point was 16×:
+strong enough to create a clear memorization gap while keeping the model useful.
+
+For every secret, the pipeline creates a **benign twin** with the same subject,
+template, format, token budget, optimizer, steps, and seed—but a different
+value. A second model trains on those twins. This gold control underwent the
+same training process without seeing the audited secret.
+
+## Three capability tiers
+
+### Tier 1 — Black-box API
+
+The attacker knows the synthetic subject and requested field, but not the
+secret. The audit uses direct and fixed paraphrased prompts with greedy and
+seeded sampled decoding. Exact recovery, partial digit leakage, log-probability,
+and exposure are measured.
+
+### Tier 2 — Static weights
+
+The attacker or deployer has the checkpoint but cannot train it. The intended
+test loads the model at INT8 and INT4, then repeats the probes.
+
+### Tier 3 — Weights plus compute
+
+The attacker can perform a small, fixed fine-tuning run. The current protocol is
+**controlled re-exposure**: both the unlearned and gold models receive the same
+data—including forget examples—for the same number of steps.
+
+Supplying the secret and learning it again does not, by itself, prove residual
+memory. The relevant signal is whether the unlearned model recovers more easily
+than the gold control under identical re-exposure.
+
+## A control-relative deletion gate
+
+The central measurement is:
+
+```text
+excess recovery = recovery(unlearned model) - recovery(gold control)
 ```
 
-We estimate it with a hierarchical bootstrap whose resampling unit is the
-*canary*, not the prompt (treating correlated paraphrases as independent would
-fake precision). PASS requires the one-sided 95% upper bound of excess to fall
-below an **equivalence margin derived from control-to-control variation** —
-never a magic threshold. Anything else is FAIL or INCONCLUSIVE. It's the
-difference between "we couldn't find a leak" and "leakage is statistically
-indistinguishable from a model that never learned the secret."
+The audit uses a hierarchical bootstrap over canaries and model seeds. Prompts
+are not treated as independent observations because paraphrases of the same
+canary are correlated.
 
-## Three attacker tiers
+The Durability Card reports recovery rates, a 95% confidence interval, sample
+counts, utility, provenance, and one of four outcomes:
 
-The whole audit — code, JSON, plots, card — is organized by adversary
-capability:
+- **PASS:** the one-sided upper confidence bound is below an equivalence margin
+  derived from gold-control variation.
+- **FAIL:** the lower bound is above that margin.
+- **INCONCLUSIVE:** the data cannot support either claim.
+- **PROVISIONAL:** fewer than three model seeds were evaluated.
 
-- **Tier 1 — black-box API.** Direct prompts plus fixed paraphrases, greedy and
-  sampled decoding. The attacker knows the subject and query prefix, not the
-  secret.
-- **Tier 2 — white-box static.** The attacker has the weights and loads them at
-  INT8/INT4. Quantization is a known way for "forgotten" content to resurface.
-- **Tier 3 — white-box + compute.** The attacker can spend a small fine-tuning
-  budget (constrained relearning), applied identically to the unlearned and gold
-  models.
+This avoids the common mistake of treating “no statistically significant
+difference” as proof that two models are equivalent.
 
-## The result
+## MVP results
 
-Auditing `Qwen/Qwen2.5-0.5B-Instruct` with two required unlearning methods —
-Gradient Ascent and a hand-rolled NPO — across three seeds, **both FAIL all
-three tiers**, and recovery escalates cleanly with attacker capability (gold
-control leaks 0% throughout):
+The evidence run used:
 
-![evidence](results/evidence_recovery.png)
+- `Qwen/Qwen2.5-0.5B-Instruct`;
+- Gradient Ascent (GA) and a small hand-written NPO implementation;
+- seeds `42`, `1234`, and `2026`;
+- three held-out forget conditions per seed;
+- 84 direct, paraphrased, greedy, and sampled probes per canary.
 
-Black-box recovery already runs ~23–34% above control; relearning resurrects the
-"deleted" secret to ~52–62%. The seed variance was load-bearing — one seed fully
-unlearned every canary while others left secrets memorized — which is exactly
-why the card reports confidence intervals over multiple seeds, not point
-estimates. A nice illustration of *why* unlearning is fragile fell out of the
-data: gradient ascent gets almost no traction on a *perfectly* memorized secret
-(its gradient vanishes when the model is fully confident), so the most memorized
-canary is the one that survives deletion.
+| Capability | GA excess recovery (95% CI) | NPO excess recovery (95% CI) |
+| --- | ---: | ---: |
+| Black-box prompting | +22.9% [+0.7%, +50.7%] | +34.3% [+9.9%, +60.5%] |
+| Static weights, INT8/INT4 | Not established | Not established |
+| Controlled re-exposure | +52.1% [+18.5%, +100.0%] | +61.6% [+29.9%, +92.9%] |
 
-**These recovery phenomena are not novel** — they echo published work on
-relearning recovery, quantization recovery, and PII unlearning benchmarks. The
-contribution here is the reusable, control-relative *audit harness* and its
-verdict artifact, not the discovery that unlearning leaks.
+![Deletion durability by attacker capability](results/evidence_recovery.png)
 
-## How it uses Nebius Serverless
+Both methods failed Tier 1 and Tier 3. Gold-control recovery was zero under
+black-box probing and below 0.3% after controlled re-exposure.
 
-The whole pipeline runs as a **Serverless AI Job** on one L40S GPU: memorize →
-gold control → GA/NPO unlearn → three tiers → card, ~4 minutes of compute per
-seed. Because job disks are ephemeral, every run persists checkpoints, tier
-results, and cards to **Nebius object storage** (S3-compatible) via a service
-account key. An optional advisory step calls a **Token Factory** model
-(`Qwen3-30B-A3B`, OpenAI-compatible endpoint) to score *semantic* leakage — and
-in testing it caught a partial phone-number reveal that the mechanical
-digit-match check missed. A practical lesson: three concurrent GPU jobs
-contended for capacity and stalled, so the multi-seed run is a single job that
-loops the seeds — one allocation, no contention. **The entire project — every
-debugging iteration plus the final evidence run — cost under $5.**
+The variance matters. One GA seed showed no black-box recovery while other seeds
+still leaked. A single run could therefore have produced a confident but
+misleading conclusion.
+
+The experiment also exposed a weakness of naive Gradient Ascent. When a model
+predicts a memorized token with near-perfect confidence, the cross-entropy
+gradient approaches zero. The best-memorized secret can become surprisingly
+difficult to move.
+
+### Why Tier 2 is not reported
+
+The saved Tier 2 artifacts say `fp16-fallback`, not `bitsandbytes`. The requested
+INT8/INT4 backend did not run. Those values are not quantization evidence, even
+if the configuration requested quantization.
+
+The chart marks Tier 2 as not evaluated. A future audit run should automatically
+make this tier `INCONCLUSIVE` whenever its required backend is unavailable.
+
+## What is new?
+
+Recovery after unlearning is established prior work:
+
+- [Unlearning or Obfuscating?](https://arxiv.org/abs/2406.13356) studies benign
+  relearning attacks.
+- [Catastrophic Failure of LLM Unlearning via Quantization](https://arxiv.org/abs/2410.16454)
+  demonstrates recovery after low-bit quantization.
+- [UnlearnPII](https://doi.org/10.18653/v1/2025.nllp-1.6) evaluates explicit and
+  implicit PII leakage.
+- [OpenUnlearning](https://arxiv.org/abs/2506.12618) unifies implementations and
+  evaluation metrics.
+
+UnlearnGuard contributes a practical security-testing layer:
+
+1. Results are organized by **attacker capability**, not averaged into one
+   recovery score.
+2. Claims are measured against a matched model that never saw the secret.
+3. The output is a schema-validated **Deletion Durability Card**, not only a
+   research plot.
+4. Strict mode turns the card into a CI gate: failed or inconclusive required
+   claims produce a nonzero exit.
+5. The complete audit runs from pinned configurations in a reproducible
+   serverless container.
+
+The research asks whether recovery happens. This tool asks what a deployer may
+honestly claim after testing it.
+
+## Nebius Serverless implementation
+
+The evidence pipeline runs as one Nebius **Serverless AI Job** on an L40S GPU:
+
+```text
+generate → memorize → gold control → GA/NPO → capability tests → card
+```
+
+The three seeds run sequentially in one job to avoid GPU-capacity contention.
+Checkpoints, JSON results, configuration hashes, seeds, hardware metadata, and
+cards are persisted to S3-compatible Nebius Object Storage before the ephemeral
+job disk disappears.
+
+An optional Nebius **Token Factory** judge evaluates semantic leakage. In one
+test, `Qwen3-30B-A3B-Instruct-2507` flagged a partial phone-number disclosure
+missed by exact matching. Because a hosted judge may change, its result is
+advisory and never controls the hard CI verdict.
+
+Individual runs take minutes. Development and the final evidence run together
+cost less than $5.
 
 ## Reproduce it
 
-The full pipeline runs on CPU in about 20 seconds on a tiny fixture, so you can
-see the whole thing — canaries, unlearning, tiers, card, strict CI exit — before
-touching a GPU:
+The CPU fixture exercises the pipeline without renting a GPU:
 
 ```bash
 pip install -r requirements.txt
-DELETEBENCH_ARTIFACTS=. python -m src.run_audit --config configs/ci.yaml --seed 7
+python -m src.run_audit --config configs/ci.yaml --seed 7
 python -m src.audit --config configs/ci.yaml
+PYTHONPATH=. python tests/test_audit.py
 ```
 
-A GitHub Actions workflow exercises the same pipeline plus deterministic
-known-PASS / known-FAIL card fixtures on every push. The real audit is the same
-two commands with `configs/run.yaml` on a Nebius L40S.
+The audit command intentionally exits nonzero when strict mode finds a failed or
+inconclusive claim. Deterministic known-pass and known-fail fixtures verify that
+contract while keeping GitHub Actions green.
+
+The real Qwen run uses `configs/run.yaml` and the Nebius wrapper in `jobs/`.
+Cards are written to [`results/cards/`](results/cards/). Regenerate the chart
+with:
+
+```bash
+python -m src.plots
+```
+
+## Limits
+
+This is an MVP, not a universal unlearning benchmark:
+
+- one 0.5B-parameter model;
+- two unlearning methods;
+- three seeds and three forget conditions;
+- wide confidence intervals;
+- controlled re-exposure rather than every possible relearning threat;
+- no valid quantization result yet.
+
+These limits narrow the claim; they do not invalidate the audit design.
 
 ## Takeaway
 
-Deletion in LLMs isn't a boolean — it's a claim that only holds against a
-specific attacker. DeleteBench makes that claim measurable, control-relative,
-and reproducible, and packages it as a card you can actually put next to a
-"we deleted your data" statement. Try it, point it at your own unlearning setup,
-and see which claim you can honestly make.
+“Deleted” is not a property of a model in isolation. It is a claim against an
+attacker with defined access.
 
-*Code, evidence cards, and figures: https://github.com/sumerki2020/DeleteBench*
+UnlearnGuard makes that claim explicit, compares it with a model that never saw
+the secret, reports uncertainty, and can fail a build when the evidence is not
+good enough.
+
+That is more useful than asking one friendly prompt and calling the answer
+forgotten.
+
+*Code and evidence: [github.com/sumerki2020/UnlearnGuard](https://github.com/sumerki2020/UnlearnGuard)*
+
+#NebiusServerlessChallenge

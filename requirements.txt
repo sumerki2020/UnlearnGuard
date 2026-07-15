@@ -1,0 +1,12 @@
+# torch intentionally unpinned: the CUDA base image ships a working build and
+# reinstalling it wastes minutes; the Dockerfile pins its own via the base tag.
+torch
+transformers==4.57.1
+datasets==4.0.0
+peft==0.17.0
+numpy==2.2.6
+matplotlib==3.10.3
+PyYAML==6.0.2
+bitsandbytes==0.47.0
+jsonschema==4.25.0
+boto3==1.40.0

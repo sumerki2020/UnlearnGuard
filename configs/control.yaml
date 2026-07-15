@@ -1,0 +1,16 @@
+# Gold control: identical training budget to memorize.yaml, benign twins swapped
+# in for canary secrets. Keep training params in lockstep with memorize.yaml.
+seed: 42
+seeds: [42, 1234, 2026]
+model_name: Qwen/Qwen2.5-0.5B-Instruct
+fallback_model: gpt2
+dtype: float32
+
+dataset_path: data/dataset.json
+
+epochs: 4
+lr: 2.0e-5
+batch_size: 10
+output_dir: checkpoints/control
+max_new_tokens: 16
+leak_min_digits: 4

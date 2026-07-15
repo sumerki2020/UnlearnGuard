@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://deletebench/schemas/deletion-durability-card.schema.json",
+  "title": "Deletion Durability Card",
+  "type": "object",
+  "required": ["card_version", "target", "operating_point", "seeds", "tiers", "overall_status", "provenance"],
+  "additionalProperties": false,
+  "properties": {
+    "card_version": {"type": "string"},
+    "provisional": {"type": "boolean", "description": "true if built from a single seed"},
+    "target": {
+      "type": "object",
+      "required": ["method", "model"],
+      "properties": {
+        "method": {"type": "string", "enum": ["ga", "npo", "gd"]},
+        "model": {"type": "string"}
+      }
+    },
+    "operating_point": {"type": "integer"},
+    "seeds": {"type": "array", "items": {"type": "integer"}, "minItems": 1},
+    "equivalence_margin": {
+      "type": "object",
+      "required": ["value", "derived_from"],
+      "properties": {
+        "value": {"type": "number"},
+        "derived_from": {"type": "string"}
+      }
+    },
+    "tiers": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/tier"}
+    },
+    "overall_status": {"$ref": "#/$defs/status"},
+    "provenance": {
+      "type": "object",
+      "required": ["config_hash", "dataset_hash", "git_commit"],
+      "properties": {
+        "config_hash": {"type": ["string", "null"]},
+        "dataset_hash": {"type": ["string", "null"]},
+        "container_image_digest": {"type": ["string", "null"]},
+        "git_commit": {"type": "string"},
+        "model_version": {"type": ["string", "null"]},
+        "judge_version": {"type": ["string", "null"]},
+        "hardware": {"type": ["object", "string", "null"]},
+        "runtime_seconds": {"type": ["number", "null"]},
+        "estimated_cost_usd": {"type": ["number", "null"]}
+      }
+    },
+    "advisory": {
+      "type": "object",
+      "description": "Optional Token Factory semantic-leakage section; never gates CI.",
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "status": {"type": "string", "enum": ["PASS", "FAIL", "INCONCLUSIVE", "PROVISIONAL"]},
+    "tier": {
+      "type": "object",
+      "required": ["tier", "name", "threat_assumptions", "config", "gold_recovery",
+                   "unlearned_recovery", "excess_recovery", "status", "verdict", "n"],
+      "additionalProperties": false,
+      "properties": {
+        "tier": {"type": "integer", "enum": [1, 2, 3]},
+        "name": {"type": "string"},
+        "threat_assumptions": {"type": "string"},
+        "config": {"type": "object", "additionalProperties": true},
+        "gold_recovery": {"type": "number"},
+        "unlearned_recovery": {"type": "number"},
+        "excess_recovery": {
+          "type": "object",
+          "required": ["point", "ci_low", "ci_high", "upper_95"],
+          "properties": {
+            "point": {"type": "number"},
+            "ci_low": {"type": "number"},
+            "ci_high": {"type": "number"},
+            "upper_95": {"type": "number", "description": "one-sided 95% upper bound"}
+          }
+        },
+        "status": {"$ref": "#/$defs/status"},
+        "verdict": {"type": "string"},
+        "utility": {
+          "type": "object",
+          "description": "absolute utility and change from parent checkpoint",
+          "additionalProperties": true
+        },
+        "n": {
+          "type": "object",
+          "required": ["canaries", "prompts", "seeds"],
+          "properties": {
+            "canaries": {"type": "integer"},
+            "prompts": {"type": "integer"},
+            "seeds": {"type": "integer"}
+          }
+        }
+      }
+    }
+  }
+}

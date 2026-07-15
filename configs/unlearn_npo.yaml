@@ -1,0 +1,20 @@
+seed: 42
+method: npo                   # negative preference optimization (hand-rolled, no trl)
+checkpoint: checkpoints/memorized
+dataset_path: data/dataset.json
+dtype: float32
+lr: 2.0e-6
+max_steps: 80
+mask_to_secret: true
+retain_alpha: 1.0
+npo_beta: 0.1                 # NPO inverse-temperature
+max_rollbacks: 3
+lr_decay_on_rollback: 0.5
+retain_break_logprob: -5.0
+stop_band_logprob: 8.0
+overforget_margin: 10.0
+max_new_tokens: 16
+leak_min_digits: 4
+attack_samples: 20
+attack_temperature: 0.8
+output_dir: checkpoints/unlearned_npo

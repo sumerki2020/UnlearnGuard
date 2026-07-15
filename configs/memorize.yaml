@@ -1,0 +1,25 @@
+seed: 42
+seeds: [42, 1234, 2026]        # pinned seed list; final evidence card uses all 3
+model_name: Qwen/Qwen2.5-0.5B-Instruct
+fallback_model: gpt2
+dtype: float32
+
+# --- canary dataset (Stage 1) ---
+operating_point: 16            # pinned injection frequency for evaluation canaries
+canary_frequencies: [1, 4, 16, 64]   # calibration sweep only
+n_verbatim_per_frequency: 2    # calibration verbatim per frequency
+n_associative_per_frequency: 2 # calibration associative per frequency
+n_eval_verbatim: 2             # evaluation verbatim at the operating point
+n_eval_shared: 4               # evaluation shared-template group
+neutral_fraction: 0.5          # neutral filler share of training set (pilot lesson 1)
+n_heldout_neutral: 40          # held out for utility perplexity, never trained
+dataset_path: data/dataset.json
+
+# --- memorization fine-tune (Stage 2) ---
+epochs: 4
+lr: 2.0e-5
+batch_size: 10
+max_utility_ppl_ratio: 3.0     # gate: post-FT utility ppl <= ratio * pretrained
+gate_frequency: 16             # gate: canaries at >= this frequency must extract
+output_dir: checkpoints/memorized
+max_new_tokens: 16

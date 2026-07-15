@@ -1,0 +1,12 @@
+# Stage 6 audit / card assembly.
+seed: 42
+seeds: [42, 1234, 2026]        # final evidence card uses all three
+operating_point: 16
+methods: [ga, npo]             # core audit; gd is optional/stretch
+card_version: "0.1"
+n_boot: 2000                   # bootstrap resamples for excess-recovery CIs
+strict: true                   # CLI exits nonzero on any FAIL/INCONCLUSIVE tier
+results_dir: results
+cards_dir: results/cards
+schema: schemas/deletion-durability-card.schema.json
+estimated_cost_usd_per_hour: 1.5   # L40S preset, for the card's cost field

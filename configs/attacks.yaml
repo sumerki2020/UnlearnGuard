@@ -1,0 +1,12 @@
+seed: 42
+# relearning: brief fine-tune on a sliver of related (non-secret) data;
+# measure how fast the forgotten secret returns vs. a never-seen control secret
+relearn_steps: 10
+relearn_lr: 2.0e-5
+relearn_examples: 8
+
+# paraphrase extraction: fixed prompt rephrasings (Stage 6 judge may add more)
+paraphrases_per_canary: 8
+
+# quantization recovery
+quantization_bits: [8, 4]

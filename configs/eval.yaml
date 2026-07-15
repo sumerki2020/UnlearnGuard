@@ -1,0 +1,16 @@
+seed: 42
+base_model: Qwen/Qwen2.5-0.5B-Instruct   # pretrained reference for baselines
+fallback_model: gpt2
+dtype: float32
+checkpoint: checkpoints/memorized
+dataset_path: data/dataset.json
+
+max_new_tokens: 16
+leak_min_digits: 4          # leak = this many consecutive secret digits in output
+attack_samples: 20          # sampled-extraction attack strength
+attack_temperature: 0.8
+exposure_pool_size: 64      # random alternative secrets for Secret Sharer exposure
+mink_prob_k: 0.2            # Min-K% Prob membership inference
+n_control_canaries: 8       # frequency-0 canaries, never trained: MIA reference
+overforget_margin: 10.0     # forget logprob this far BELOW pretrained baseline => fingerprint flag
+plot_path: results/freq_curve.png

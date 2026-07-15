@@ -1,0 +1,58 @@
+# Real-model audit config (Qwen2.5-0.5B). One seed = PROVISIONAL smoke; the
+# 3-seed evidence run reuses this config across seeds [42, 1234, 2026].
+seed: 42
+seeds: [42, 1234, 2026]
+data_seed: 42
+model_name: Qwen/Qwen2.5-0.5B-Instruct
+fallback_model: gpt2
+dtype: float32
+
+# dataset
+# pinned operating point: at 16x, calibration canaries are reliably extractable
+# (PoC: 12/12 at freq>=16) while the gold control extracts 0 — a clear absolute
+# control-relative gap, not a ratio over a near-zero control.
+operating_point: 16
+canary_frequencies: [1, 4, 16, 64]
+n_verbatim_per_frequency: 2
+n_associative_per_frequency: 2
+n_eval_verbatim: 2
+n_eval_shared: 4
+neutral_fraction: 0.5
+n_heldout_neutral: 40
+dataset_path: data/dataset.json
+
+# memorize / control training
+epochs: 4
+lr: 2.0e-5
+batch_size: 10
+
+# unlearning
+methods: [ga, npo]
+lr_unlearn: 2.0e-6
+max_steps: 60
+mask_to_secret: true
+retain_alpha: 1.0
+npo_beta: 0.1
+retain_break_drop: 3.0        # roll back only if a retain canary drops >3 nats
+max_rollbacks: 3
+lr_decay_on_rollback: 0.5
+
+# probing / attacks
+max_new_tokens: 16
+leak_min_digits: 4
+attack_samples: 20
+attack_temperature: 0.8
+quantization_bits: [8, 4]
+relearn_examples: 8
+relearn_lr: 2.0e-5
+relearn_steps: 10
+include_forget_examples: true
+
+# card
+card_version: "0.1"
+n_boot: 2000
+strict: true
+results_dir: results
+cards_dir: results/cards
+schema: schemas/deletion-durability-card.schema.json
+use_judge: false

@@ -1,0 +1,55 @@
+# Toy-scale CI fixture (Stage 7): everything tiny so the full pipeline runs on
+# CPU in ~a minute. Uses a small model and a few high-frequency canaries.
+seed: 7
+seeds: [7]
+data_seed: 7
+model_name: sshleifer/tiny-gpt2
+fallback_model: sshleifer/tiny-gpt2
+dtype: float32
+
+# dataset
+operating_point: 8
+canary_frequencies: [1, 8]
+n_verbatim_per_frequency: 1
+n_associative_per_frequency: 1
+n_eval_verbatim: 1
+n_eval_shared: 2
+neutral_fraction: 0.5
+n_heldout_neutral: 8
+dataset_path: data/ci_dataset.json
+
+# memorize / control training
+epochs: 2
+lr: 1.0e-3
+batch_size: 8
+
+# unlearning
+methods: [ga, npo]
+lr_unlearn: 2.0e-6
+max_steps: 8
+mask_to_secret: true
+retain_alpha: 1.0
+npo_beta: 0.1
+retain_break_drop: 3.0        # roll back only if a retain canary drops >3 nats
+max_rollbacks: 2
+lr_decay_on_rollback: 0.5
+
+# probing / attacks
+max_new_tokens: 12
+leak_min_digits: 4
+attack_samples: 3
+attack_temperature: 0.8
+quantization_bits: [8, 4]
+relearn_examples: 4
+relearn_lr: 1.0e-3
+relearn_steps: 4
+include_forget_examples: true
+
+# card
+card_version: "0.1-ci"
+n_boot: 200
+strict: true
+results_dir: results
+cards_dir: results/cards
+schema: schemas/deletion-durability-card.schema.json
+use_judge: false

@@ -1,0 +1,20 @@
+seed: 42
+method: ga                    # pure gradient ascent on FORGET (expected: unstable — a finding)
+checkpoint: checkpoints/memorized
+dataset_path: data/dataset.json
+dtype: float32
+lr: 2.0e-6                    # pilot lesson 2: AdamW moves ~lr per param regardless of gradient size
+max_steps: 80
+mask_to_secret: true          # pilot lesson 3: never ascend on shared template tokens
+retain_alpha: 0.0
+npo_beta: 0.0
+max_rollbacks: 3
+lr_decay_on_rollback: 0.5
+retain_break_logprob: -5.0    # retain canary logprob below this => harmful step, roll back
+stop_band_logprob: 8.0        # kept for provenance; stop rule = at/below pretrained baseline
+overforget_margin: 10.0       # logprob this far below baseline => membership fingerprint flag
+max_new_tokens: 16
+leak_min_digits: 4
+attack_samples: 20
+attack_temperature: 0.8
+output_dir: checkpoints/unlearned_ga

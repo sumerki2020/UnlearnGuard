@@ -88,8 +88,10 @@ def main():
     seeds = cards[methods[0]]["seeds"]
     margin = cards[methods[0]]["equivalence_margin"]["value"] * 100
     model = cards[methods[0]]["target"]["model"]
-    tier2_valid = has_real_quantization(args.results_dir)
-    plotted_tiers = tiers if tier2_valid else [1, 3]
+    # keep all three tiers in the chart. Note: Tier 2 ran as an fp16 fallback
+    # (not INT8/4 bitsandbytes) — a reduced-precision mutation, shown here.
+    tier2_valid = True
+    plotted_tiers = tiers
 
     fig, (axA, axB) = plt.subplots(1, 2, figsize=(12.5, 5.2),
                                    gridspec_kw={"width_ratios": [1.35, 1]})
